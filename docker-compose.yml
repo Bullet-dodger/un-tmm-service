@@ -1,0 +1,19 @@
+# docker-compose.yml
+
+#version: '3.8'
+#
+#services:
+#  postgres:
+#    image: postgres:16
+#    container_name: combustion_db
+#    environment:
+#      POSTGRES_DB: combustion_db
+#      POSTGRES_USER: postgres
+#      POSTGRES_PASSWORD: postgres
+#    ports:
+#      - "5432:5432"
+#    volumes:
+#      - combustion_data:/var/lib/postgresql/data
+#
+#volumes:
+#  combustion_data:
