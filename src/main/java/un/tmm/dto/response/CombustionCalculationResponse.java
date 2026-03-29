@@ -1,4 +1,4 @@
-package dto.response;
+package un.tmm.dto.response;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

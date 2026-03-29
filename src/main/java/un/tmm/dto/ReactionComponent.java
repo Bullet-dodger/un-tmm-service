@@ -1,4 +1,4 @@
-package dto;
+package un.tmm.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

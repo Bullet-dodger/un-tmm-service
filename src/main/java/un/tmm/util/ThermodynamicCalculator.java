@@ -1,7 +1,7 @@
-package util;
+package un.tmm.util;
 
 
-import dto.ThermodynamicCoefficients;
+import un.tmm.dto.ThermodynamicCoefficients;
 
 public final class ThermodynamicCalculator {
 
@@ -52,7 +52,7 @@ public final class ThermodynamicCalculator {
         double x2 = x * x;
         double x3 = x2 * x;
 
-        return coef.g()
+        return coef.b()
                 + 2 * coef.c() / x2
                 + 2 * coef.e() * x
                 + 6 * coef.f() * x2
