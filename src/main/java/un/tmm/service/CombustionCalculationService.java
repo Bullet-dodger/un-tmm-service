@@ -1,17 +1,17 @@
 package un.tmm.service;
 
 
-import dto.ReactionComponent;
-import dto.TemperatureInterval;
-import dto.ThermodynamicCoefficients;
-import dto.request.CombustionCalculationRequest;
-import dto.request.MaterialQuantityDto;
-import dto.response.CombustionCalculationResponse;
+import un.tmm.dto.ReactionComponent;
+import un.tmm.dto.TemperatureInterval;
+import un.tmm.dto.ThermodynamicCoefficients;
+import un.tmm.dto.request.CombustionCalculationRequest;
+import un.tmm.dto.request.MaterialQuantityDto;
+import un.tmm.dto.response.CombustionCalculationResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import un.tmm.model.entity.ThermodynamicCoefficient;
 import un.tmm.model.repository.ThermodynamicCoefficientRepository;
-import util.ThermodynamicCalculator;
+import un.tmm.util.ThermodynamicCalculator;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -31,17 +31,14 @@ public class CombustionCalculationService {
 
     private final ThermodynamicCoefficientRepository coefficientRepository;
 
-    private List<ReactionComponent> currentProducts;
-
     public CombustionCalculationResponse calculate(CombustionCalculationRequest request) {
         List<ReactionComponent> reagents = buildReactionComponents(request.getReagents());
         List<ReactionComponent> products = buildReactionComponents(request.getProducts());
 
         calculatePhaseTransitionEnthalpies(products);
-        this.currentProducts = products;
 
         double initialEnthalpy = calculateInitialEnthalpy(reagents, products);
-        double adiabaticTemperature = findAdiabaticTemperature(INITIAL_TEMPERATURE, initialEnthalpy);
+        double adiabaticTemperature = findAdiabaticTemperature(INITIAL_TEMPERATURE, initialEnthalpy, products);
 
         return CombustionCalculationResponse.builder()
                 .adiabaticTemperature(BigDecimal.valueOf(adiabaticTemperature).setScale(2, RoundingMode.HALF_UP))
@@ -100,9 +97,6 @@ public class CombustionCalculationService {
         return components;
     }
 
-    /**
-     * Расчёт энтальпий фазовых переходов для продуктов
-     */
     private void calculatePhaseTransitionEnthalpies(List<ReactionComponent> products) {
         for (ReactionComponent product : products) {
             List<TemperatureInterval> intervals = product.getIntervals();
@@ -131,9 +125,6 @@ public class CombustionCalculationService {
         }
     }
 
-    /**
-     * Расчёт начальной энтальпии реакции при 298.15 K
-     */
     private double calculateInitialEnthalpy(List<ReactionComponent> reagents, List<ReactionComponent> products) {
         double enthalpy = 0.0;
 
@@ -152,9 +143,6 @@ public class CombustionCalculationService {
         return enthalpy;
     }
 
-    /**
-     * Получение теплоёмкости компонента при заданной температуре
-     */
     private double getHeatCapacityAtTemperature(ReactionComponent component, double temperature) {
         List<TemperatureInterval> intervals = component.getIntervals();
 
@@ -178,13 +166,10 @@ public class CombustionCalculationService {
         return 0.0;
     }
 
-    /**
-     * Сумма энтальпий фазовых переходов до температуры T
-     */
-    private double sumPhaseTransitionEnthalpies(double temperature) {
+    private double sumPhaseTransitionEnthalpies(double temperature, List<ReactionComponent> products) {
         double sum = 0.0;
 
-        for (ReactionComponent product : currentProducts) {
+        for (ReactionComponent product : products) {
             for (TemperatureInterval interval : product.getIntervals()) {
                 if (temperature >= interval.getTMin() && temperature < interval.getTMax()) {
                     sum += product.getMoleCount() * interval.getPhaseTransitionEnthalpy();
@@ -195,53 +180,41 @@ public class CombustionCalculationService {
         return sum;
     }
 
-    /**
-     * Сумма теплоёмкостей всех продуктов при температуре T
-     */
-    private double totalHeatCapacity(double temperature) {
+    private double totalHeatCapacity(double temperature, List<ReactionComponent> products) {
         double total = 0.0;
 
-        for (ReactionComponent product : currentProducts) {
+        for (ReactionComponent product : products) {
             total += getHeatCapacityAtTemperature(product, temperature);
         }
 
         return total;
     }
 
-    /**
-     * Численное интегрирование методом трапеций
-     */
-    private double integrateHeatCapacity(double fromTemperature, double toTemperature) {
+    private double integrateHeatCapacity(double fromTemperature, double toTemperature, List<ReactionComponent> products) {
         double step = (toTemperature - fromTemperature) / INTEGRATION_STEPS;
         double integral = 0.0;
 
         for (int i = 0; i < INTEGRATION_STEPS; i++) {
             double t1 = fromTemperature + i * step;
             double t2 = t1 + step;
-            integral += (totalHeatCapacity(t1) + totalHeatCapacity(t2)) * step / 2.0;
+            integral += (totalHeatCapacity(t1, products) + totalHeatCapacity(t2, products)) * step / 2.0;
         }
 
         return integral;
     }
 
-    /**
-     * Расчёт конечной энтальпии при температуре T
-     */
-    private double calculateFinalEnthalpy(double temperature, double initialEnthalpy) {
-        double integral = integrateHeatCapacity(INITIAL_TEMPERATURE, temperature);
-        return integral + sumPhaseTransitionEnthalpies(temperature) - initialEnthalpy;
+    private double calculateFinalEnthalpy(double temperature, double initialEnthalpy, List<ReactionComponent> products) {
+        double integral = integrateHeatCapacity(INITIAL_TEMPERATURE, temperature, products);
+        return integral + sumPhaseTransitionEnthalpies(temperature, products) - initialEnthalpy;
     }
 
-    /**
-     * Поиск адиабатической температуры методом Ньютона
-     */
-    private double findAdiabaticTemperature(double initialGuess, double initialEnthalpy) {
+    private double findAdiabaticTemperature(double initialGuess, double initialEnthalpy, List<ReactionComponent> products) {
         double temperature = initialGuess;
 
         for (int i = 0; i < NEWTON_MAX_ITERATIONS; i++) {
-            double f = calculateFinalEnthalpy(temperature, initialEnthalpy);
-            double fPlus = calculateFinalEnthalpy(temperature + NEWTON_TOLERANCE, initialEnthalpy);
-            double fMinus = calculateFinalEnthalpy(temperature - NEWTON_TOLERANCE, initialEnthalpy);
+            double f = calculateFinalEnthalpy(temperature, initialEnthalpy, products);
+            double fPlus = calculateFinalEnthalpy(temperature + NEWTON_TOLERANCE, initialEnthalpy, products);
+            double fMinus = calculateFinalEnthalpy(temperature - NEWTON_TOLERANCE, initialEnthalpy, products);
 
             double derivative = (fPlus - fMinus) / (2 * NEWTON_TOLERANCE);
             double deltaT = -f / derivative;
