@@ -1,0 +1,19 @@
+# Version control
+.git
+.gitattributes
+.gitignore
+
+# IDE / tooling
+.idea
+.gradle
+.claude
+
+# Build artefacts — rebuilt inside Docker
+build
+
+# Frontend — has its own build stage
+frontend
+
+# Docs
+*.md
+HELP.md

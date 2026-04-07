@@ -1,17 +1,51 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:16
+
+  # ── PostgreSQL ────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
     container_name: tmm_db
     environment:
       POSTGRES_DB: tmm_db
       POSTGRES_USER: tmm_user
       POSTGRES_PASSWORD: tmm_password
-    ports:
-      - "5432:5432"
     volumes:
       - tmm_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"          # expose for local tools (DBeaver, psql, etc.)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tmm_user -d tmm_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Spring Boot backend ───────────────────────────────────────
+  backend:
+    build: .
+    container_name: tmm_backend
+    environment:
+      # Override localhost → Docker service name
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/tmm_db
+      SPRING_DATASOURCE_USERNAME: tmm_user
+      SPRING_DATASOURCE_PASSWORD: tmm_password
+    expose:
+      - "8080"               # internal only — Nginx proxies to it
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── React frontend (Nginx) ────────────────────────────────────
+  frontend:
+    build: ./frontend
+    container_name: tmm_frontend
+    ports:
+      - "80:80"              # public entrypoint
+    depends_on:
+      - backend
+    restart: unless-stopped
 
 volumes:
   tmm_data:

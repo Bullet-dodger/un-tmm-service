@@ -38,7 +38,7 @@ public class CombustionCalculationService {
         calculatePhaseTransitionEnthalpies(products);
 
         double initialEnthalpy = calculateInitialEnthalpy(reagents, products);
-        double adiabaticTemperature = findAdiabaticTemperature(INITIAL_TEMPERATURE, initialEnthalpy, products);
+        double adiabaticTemperature = findAdiabaticTemperature(INITIAL_TEMPERATURE + NEWTON_TOLERANCE, initialEnthalpy, products);
 
         return CombustionCalculationResponse.builder()
                 .adiabaticTemperature(BigDecimal.valueOf(adiabaticTemperature).setScale(2, RoundingMode.HALF_UP))
@@ -53,15 +53,17 @@ public class CombustionCalculationService {
             List<ThermodynamicCoefficient> dbCoefficients = coefficientRepository
                     .findByMaterialId(material.getMaterialId());
 
-            dbCoefficients.sort(Comparator.comparing(ThermodynamicCoefficient::getTMin));
+            dbCoefficients.sort(Comparator
+                    .comparing(ThermodynamicCoefficient::getTMin)
+                    .thenComparingInt(c -> statePriority(String.valueOf(c.getState())))
+                    .thenComparing(ThermodynamicCoefficient::getTMax));
 
-            List<TemperatureInterval> intervals = new ArrayList<>();
             double formationEnthalpy = 0.0;
 
-            for (int i = 0; i < dbCoefficients.size(); i++) {
-                ThermodynamicCoefficient dbCoef = dbCoefficients.get(i);
+            List<TemperatureInterval> rawIntervals = new ArrayList<>();
 
-                if (i == 0 && dbCoef.getCalculationEnthalpy() != null) {
+            for (ThermodynamicCoefficient dbCoef : dbCoefficients) {
+                if (formationEnthalpy == 0.0 && dbCoef.getCalculationEnthalpy() != null) {
                     formationEnthalpy = dbCoef.getCalculationEnthalpy().doubleValue() * JOULES_PER_KILOJOULE;
                 }
 
@@ -75,14 +77,26 @@ public class CombustionCalculationService {
                         .g(toDouble(dbCoef.getG()))
                         .build();
 
-                TemperatureInterval interval = TemperatureInterval.builder()
+                rawIntervals.add(TemperatureInterval.builder()
                         .tMin(dbCoef.getTMin().doubleValue())
                         .tMax(dbCoef.getTMax().doubleValue())
                         .coefficients(coefficients)
                         .phaseTransitionEnthalpy(0.0)
-                        .build();
+                        .build());
+            }
 
-                intervals.add(interval);
+            List<TemperatureInterval> intervals = new ArrayList<>();
+            double prevTMax = Double.NEGATIVE_INFINITY;
+
+            for (TemperatureInterval iv : rawIntervals) {
+                if (iv.getTMin() >= prevTMax) {
+                    intervals.add(iv);
+                    prevTMax = iv.getTMax();
+                } else if (iv.getTMax() > prevTMax) {
+                    iv.setTMin(prevTMax);
+                    intervals.add(iv);
+                    prevTMax = iv.getTMax();
+                }
             }
 
             ReactionComponent component = ReactionComponent.builder()
@@ -97,11 +111,24 @@ public class CombustionCalculationService {
         return components;
     }
 
+    /** SOLID → 0, LIQUID → 1, GAS → 2, unknown → 3 */
+    private static int statePriority(String state) {
+        if (state == null) return 3;
+        return switch (state.toUpperCase()) {
+            case "SOLID"  -> 0;
+            case "LIQUID" -> 1;
+            case "GAS"    -> 2;
+            default       -> 3;
+        };
+    }
+
     private void calculatePhaseTransitionEnthalpies(List<ReactionComponent> products) {
         for (ReactionComponent product : products) {
             List<TemperatureInterval> intervals = product.getIntervals();
             double formationEnthalpy = product.getFormationEnthalpy();
             double previousEnthalpy = 0.0;
+
+            TemperatureInterval baseInterval = intervals.get(0);
 
             for (int i = 0; i < intervals.size(); i++) {
                 TemperatureInterval interval = intervals.get(i);
@@ -109,11 +136,10 @@ public class CombustionCalculationService {
                 if (i == 0) {
                     interval.setPhaseTransitionEnthalpy(0.0);
                 } else {
-                    TemperatureInterval previousInterval = intervals.get(i - 1);
                     double transitionTemperature = interval.getTMin();
 
                     double preFaseEnthalpy = ThermodynamicCalculator.calculateEnthalpy(
-                            previousInterval.getCoefficients(), formationEnthalpy, transitionTemperature);
+                            baseInterval.getCoefficients(), formationEnthalpy, transitionTemperature);
                     double currFaseEnthalpy = ThermodynamicCalculator.calculateEnthalpy(
                             interval.getCoefficients(), formationEnthalpy, transitionTemperature);
 

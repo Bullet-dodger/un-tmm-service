@@ -29,7 +29,7 @@ public class MaterialService {
 
     @Transactional(readOnly = true)
     public Page<MaterialSearchResponse> search(String query, Pageable pageable) {
-        return materialRepository.findByFormulaContainingIgnoreCase(query, pageable)
+        return materialRepository.searchPrioritized(query, pageable)
                 .map(this::toSearchResponse);
     }
 
